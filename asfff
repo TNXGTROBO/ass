@@ -1,9 +1,9 @@
 --[[
-    Ben 10 Optimized Script [Fluent UI Version]
-    UI: Fluent (Stable & Mobile Friendly)
+    Ben 10 Optimized Script [Fluent UI Version] - MERGED LOGIC
     Fixes:
-    - Multi-Select Dropdown works perfectly with Fluent.
-    - Optimized logic loops.
+    - Moved Auto Transform & Skills INSIDE Auto Warp loop.
+    - Prioritizes Transformation BEFORE Attacking.
+    - Fixed V press but no C press issue.
 ]]
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -18,7 +18,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 
--- // Config Variables (Global for Logic)
+-- // Config Variables
 _G.HeightAboveHead = 6
 _G.AutoWarpEnabled = false
 _G.AutoTransform = false
@@ -41,6 +41,7 @@ local spawnPoints = {
 }
 local currentPatrolIndex = 1
 local lastPatrolTime = 0
+local isTransforming = false -- Debounce variable for transformation
 
 local mobPatterns = {
     "ROBOTINVASIONEVENT", 
@@ -93,7 +94,7 @@ local function getInventoryTools()
     if player.Character then scan(player.Character) end
     
     if not found then
-        return {"No Items Found"} -- Placeholder text
+        return {"No Items Found"} 
     end
     return tools
 end
@@ -123,7 +124,7 @@ end
 
 -- // UI Window Setup
 local Window = Fluent:CreateWindow({
-    Title = "Ben 10 Fix (Fluent UI)",
+    Title = "Ben 10 Fix (Merged Logic)",
     SubTitle = "Auto Farm & Patrol",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
@@ -203,7 +204,6 @@ local MultiDropdownBlacklist = Tabs.Combat:AddDropdown("BlacklistDrop", {
     Default = {},
 })
 
--- Logic Adapter: Fluent returns {Item=true, Item2=false}, we need {"Item"}
 MultiDropdownBlacklist:OnChanged(function(Value)
     local list = {}
     for key, state in pairs(Value) do
@@ -212,7 +212,6 @@ MultiDropdownBlacklist:OnChanged(function(Value)
         end
     end
     _G.EquipBlacklist = list
-    -- print("Blacklist Updated:", table.concat(list, ", "))
 end)
 
 Tabs.Combat:AddButton({
@@ -256,7 +255,7 @@ Tabs.Misc:AddButton({
 })
 
 
--- [[ LOGIC LOOPS (UNCHANGED) ]] --
+-- [[ LOGIC LOOPS (OPTIMIZED & MERGED) ]] --
 
 -- NoClip
 RunService.Stepped:Connect(function()
@@ -272,27 +271,10 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Skill Spam
+-- Smart Equip (Standalone)
 task.spawn(function()
     while true do
-        if _G.SkillSpamEnabled then
-            local target = FindTarget()
-            local root = getRoot()
-            if target and root and (root.Position - target.HumanoidRootPart.Position).Magnitude < 50 then
-                if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
-                if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
-                if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
-                if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
-            end
-        end
-        task.wait(0.5)
-    end
-end)
-
--- Smart Equip
-task.spawn(function()
-    while true do
-        if _G.SmartEquipEnabled then
+        if _G.SmartEquipEnabled and not isTransforming then
             local char = player.Character
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
@@ -326,89 +308,100 @@ task.spawn(function()
     end
 end)
 
--- Auto Transform
-task.spawn(function()
-    while true do
-        if _G.AutoTransform then
-            local char = player.Character
-            if char and (char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")) then
-                pressKeyReal(Enum.KeyCode.V)
-                task.wait(2.5) 
-                pressKeyReal(Enum.KeyCode.C)
-                task.wait(0.2)
-                pressKeyReal(Enum.KeyCode.C)
-                task.wait(6)
-            end
-        end
-        task.wait(1)
-    end
-end)
-
--- Auto Attack
-task.spawn(function()
-    while true do
-        if _G.AutoWarpEnabled then
-            local target = FindTarget() 
-            if target then
-                local atk, anims = getCombatHandler()
-                if atk then
-                    pcall(function()
-                        atk:FireServer("Attack", false, anims)
-                        atk:FireServer("HeavyAttack", false, anims)
-                    end)
-                else
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-                    task.wait(0.05)
-                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-                end
-            end
-        end
-        task.wait(0.15)
-    end
-end)
-
--- Auto Warp + Patrol Logic
+-- [[ THE MASTER LOOP (Warp + Transform + Attack + Skills) ]] --
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
             local root = getRoot()
-            local target = FindTarget()
-              
-            if root then
-                if target and target:FindFirstChild("HumanoidRootPart") then
-                    -- [[ WARP TO KILL ]] --
-                    local mobRoot = target.HumanoidRootPart
-                    local finalCF
-                        
-                    if _G.AttackPosition == "Top" then
-                        finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
-                    elseif _G.AttackPosition == "Bottom" then
-                        finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
-                    elseif _G.AttackPosition == "Side" then
-                        local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
-                        finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
-                    end
-                        
-                    if finalCF then
-                        root.CFrame = finalCF
-                        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                    end
+            local char = player.Character
+            
+            -- Wait loop if actively transforming to prevent breaking animation
+            if isTransforming then
+                task.wait(0.5)
+            elseif root and char and char:FindFirstChild("Humanoid") then
+                
+                -- [[ 1. AUTO TRANSFORM LOGIC ]] --
+                -- Prioritize becoming an alien before engaging
+                local isHuman = char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")
+                
+                if _G.AutoTransform and isHuman then
+                    isTransforming = true
+                    
+                    -- Sequence: V -> Wait -> C -> Wait -> C (Confirm)
+                    pressKeyReal(Enum.KeyCode.V)
+                    task.wait(0.5)
+                    pressKeyReal(Enum.KeyCode.C)
+                    task.wait(0.5)
+                    pressKeyReal(Enum.KeyCode.C)
+                    
+                    -- Wait for transformation to likely finish
+                    task.wait(3) 
+                    isTransforming = false
+                
                 else
-                    -- [[ PATROL SPAWNS ]] --
-                    if tick() - lastPatrolTime > _G.PatrolWaitTime then
-                        root.CFrame = spawnPoints[currentPatrolIndex]
-                        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    -- [[ 2. TARGET FINDING & COMBAT ]] --
+                    local target = FindTarget()
+                    
+                    if target and target:FindFirstChild("HumanoidRootPart") then
+                        -- A. WARP TO TARGET
+                        local mobRoot = target.HumanoidRootPart
+                        local finalCF
+                        
+                        if _G.AttackPosition == "Top" then
+                            finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
+                        elseif _G.AttackPosition == "Bottom" then
+                            finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
+                        elseif _G.AttackPosition == "Side" then
+                            local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
+                            finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
+                        end
+                        
+                        if finalCF then
+                            root.CFrame = finalCF
+                            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end
+
+                        -- B. ATTACK & SKILLS (Only if close)
+                        if (root.Position - mobRoot.Position).Magnitude < 50 then
                             
-                        lastPatrolTime = tick()
-                        currentPatrolIndex = currentPatrolIndex + 1
-                        if currentPatrolIndex > #spawnPoints then
-                            currentPatrolIndex = 1
+                            -- Basic Attack
+                            local atk, anims = getCombatHandler()
+                            if atk then
+                                pcall(function()
+                                    atk:FireServer("Attack", false, anims)
+                                    atk:FireServer("HeavyAttack", false, anims)
+                                end)
+                            else
+                                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                                task.wait(0.05)
+                                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                            end
+
+                            -- Skills (Merged here so it won't run if Human/Transforming)
+                            if _G.SkillSpamEnabled then
+                                if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
+                                if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
+                                if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
+                                if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
+                            end
+                        end
+                    else
+                        -- [[ 3. PATROL LOGIC (No Target) ]] --
+                        if tick() - lastPatrolTime > _G.PatrolWaitTime then
+                            root.CFrame = spawnPoints[currentPatrolIndex]
+                            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                                
+                            lastPatrolTime = tick()
+                            currentPatrolIndex = currentPatrolIndex + 1
+                            if currentPatrolIndex > #spawnPoints then
+                                currentPatrolIndex = 1
+                            end
                         end
                     end
                 end
             end
         end
-        task.wait() 
+        task.wait() -- Fast tick
     end
 end)
 
@@ -417,8 +410,8 @@ SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentBen10")
-SaveManager:SetFolder("FluentBen10/Configs")
+InterfaceManager:SetFolder("FluentBen10v2")
+SaveManager:SetFolder("FluentBen10v2/Configs")
 
 InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
@@ -426,7 +419,7 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 Window:SelectTab(1)
 
 Fluent:Notify({
-    Title = "Ben 10 Script Loaded",
-    Content = "UI switched to Fluent for better dropdown support.",
+    Title = "Script Updated",
+    Content = "Merged Transform/Skills into Auto Warp Loop.",
     Duration = 5
 })
