@@ -1,59 +1,56 @@
 --[[
-    Ben 10 Mobile Optimized Script [Fix Multi-Select Dropdown]
-    UI: Orion (Stable)
+    Ben 10 Mobile Optimized Script [Rayfield Edition]
+    Library: Rayfield (Stable & Mobile Friendly)
     Fixes:
-    - Dropdown now correctly selects multiple items.
-    - Disabled SaveConfig to prevent config corruption causing the single-select bug.
+    - Replaced Orion with Rayfield for better Dropdown support.
+    - Full Multi-Select support for Blacklist.
 ]]
 
 -- รอให้เกมโหลดเสร็จ
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
-task.wait(2)
 
-print("Starting Script...")
-
--- // Load Library (ใช้ลิงก์ที่เสถียรกว่า)
-local success, OrionLib = pcall(function()
-    return loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
-end)
-
-if not success or not OrionLib then
-    OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))()
-end
+-- // Load Rayfield Library (เสถียรกว่าบนมือถือ)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 -- // Window Setup
--- !! ผมปิด SaveConfig เป็น false ก่อน เพื่อแก้บั๊ก Dropdown เด้ง !!
-local Window = OrionLib:MakeWindow({
-    Name = "Ben 10 Fix [Patrol & Smart Equip]", 
-    HidePremium = false, 
-    SaveConfig = false, -- <--- ปิดไว้ก่อนเพื่อให้ Multi Dropdown ทำงานชัวร์ๆ
-    ConfigFolder = "Ben10Fix_Multi_New",
-    IntroEnabled = true,
-    IntroText = "Patrol & Blacklist Loaded"
+local Window = Rayfield:CreateWindow({
+    Name = "Ben 10 Fix [Rayfield Mobile]",
+    LoadingTitle = "Ben 10 Mobile Hub",
+    LoadingSubtitle = "by YourName",
+    ConfigurationSaving = {
+        Enabled = false, -- ปิดเซฟ Config เพื่อป้องกันบั๊ก
+        FolderName = nil, 
+        FileName = "Ben10Hub"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "", 
+        RememberJoins = true 
+    },
+    KeySystem = false, -- ปิด Key System
 })
 
--- // Services
+-- // Services & Variables
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-
 local player = Players.LocalPlayer
 
--- // Variables & Config
+-- Global Configs
 _G.HeightAboveHead = 6
 _G.AutoWarpEnabled = false
 _G.AutoTransform = false
 _G.AttackPosition = "Top"
 _G.SmartEquipEnabled = false 
-_G.EquipBlacklist = {} 
+_G.EquipBlacklist = {} -- Table สำหรับเก็บรายชื่อไอเทมที่ไม่ต้องการถือ
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
 _G.PatrolWaitTime = 2 
 
--- // จุดเกิด 7 จุด (Spawn Points)
+-- // Logic Variables
 local spawnPoints = {
     CFrame.new(1836.52673, 11.0042171, 361.953735),
     CFrame.new(1175.94763, -6.92456007, 770.222107),
@@ -66,7 +63,6 @@ local spawnPoints = {
 local currentPatrolIndex = 1
 local lastPatrolTime = 0
 
--- Pattern มอนสเตอร์
 local mobPatterns = {
     "ROBOTINVASIONEVENT", 
     "AMBIENT_MUGGING", 
@@ -78,7 +74,7 @@ local mobPatterns = {
     "Satis"
 }
 
--- // Helper Functions
+-- // Helper Functions (Logic เดิมของคุณ)
 local function pressKeyReal(keyCode)
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
@@ -101,30 +97,24 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- ฟังก์ชันดึงชื่อไอเทมในตัว (แก้ให้หาไอเทมได้แม่นขึ้น)
 local function getInventoryTools()
     local tools = {}
-    local found = false
-    
     local function scan(container)
         for _, v in pairs(container:GetChildren()) do
             if v:IsA("Tool") and not table.find(tools, v.Name) then
                 table.insert(tools, v.Name)
-                found = true
             end
         end
     end
-
     if player.Backpack then scan(player.Backpack) end
     if player.Character then scan(player.Character) end
     
-    if not found then
-        return {"No Items Found (Refresh)"}
+    if #tools == 0 then
+        return {"No Items Found"} -- กัน Dropdown ว่าง
     end
     return tools
 end
 
--- ฟังก์ชันหาเป้าหมาย
 local function FindTarget()
     local closest = nil
     local maxDist = 3000 
@@ -148,7 +138,116 @@ local function FindTarget()
     return closest
 end
 
--- // NoClip System
+-- // Main UI Tabs
+
+local MainTab = Window:CreateTab("Auto Farm", 4483345998)
+local CombatTab = Window:CreateTab("Combat & Items", 4483345998)
+local SkillTab = Window:CreateTab("Skills", 4483345998)
+local MiscTab = Window:CreateTab("Misc", 4483345998)
+
+-- // Tab 1: Auto Farm
+MainTab:CreateToggle({
+    Name = "Auto Warp + Kill (with Patrol)",
+    CurrentValue = false,
+    Flag = "AutoWarp",
+    Callback = function(Value)
+        _G.AutoWarpEnabled = Value
+    end,
+})
+
+MainTab:CreateDropdown({
+    Name = "Attack Position",
+    Options = {"Top", "Bottom", "Side"},
+    CurrentOption = {"Top"},
+    MultipleOptions = false,
+    Callback = function(Option)
+        _G.AttackPosition = Option[1]
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Distance (Studs)",
+    Range = {0, 20},
+    Increment = 1,
+    Suffix = "Studs",
+    CurrentValue = 6,
+    Callback = function(Value)
+        _G.HeightAboveHead = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Patrol Wait Time",
+    Range = {0, 10},
+    Increment = 0.5,
+    Suffix = "Secs",
+    CurrentValue = 2,
+    Callback = function(Value)
+        _G.PatrolWaitTime = Value
+    end,
+})
+
+-- // Tab 2: Combat & Items (Fixed Dropdown Here)
+
+CombatTab:CreateToggle({
+    Name = "Auto Smart Equip Tool",
+    CurrentValue = false,
+    Callback = function(Value)
+        _G.SmartEquipEnabled = Value
+    end,
+})
+
+local DropdownItems = getInventoryTools()
+local BlacklistDropdown -- ประกาศตัวแปรไว้ก่อนเพื่อใช้ Refresh ทีหลัง
+
+BlacklistDropdown = CombatTab:CreateDropdown({
+    Name = "Blacklist Items (Multi-Select)",
+    Options = DropdownItems,
+    CurrentOption = {},
+    MultipleOptions = true, -- !! เปิดใช้ Multi-Select ของ Rayfield !!
+    Flag = "BlacklistDropdown",
+    Callback = function(Options)
+        -- Rayfield ส่งค่ากลับมาเป็น Table ของไอเทมที่เลือก
+        _G.EquipBlacklist = Options
+        
+        -- Debug Print
+        print("Blacklist Updated:")
+        for _, v in pairs(Options) do
+            print("- " .. v)
+        end
+    end,
+})
+
+CombatTab:CreateButton({
+    Name = "Refresh Inventory List",
+    Callback = function()
+        local newTools = getInventoryTools()
+        -- ใช้ฟังก์ชัน Refresh ของ Rayfield
+        BlacklistDropdown:Refresh(newTools) 
+    end,
+})
+
+-- // Tab 3: Skills
+SkillTab:CreateToggle({ Name = "Enable Skill Spam", CurrentValue = false, Callback = function(v) _G.SkillSpamEnabled = v end })
+SkillTab:CreateToggle({ Name = "Auto Z", CurrentValue = false, Callback = function(v) _G.SkillSpam.Z = v end })
+SkillTab:CreateToggle({ Name = "Auto X", CurrentValue = false, Callback = function(v) _G.SkillSpam.X = v end })
+SkillTab:CreateToggle({ Name = "Auto C", CurrentValue = false, Callback = function(v) _G.SkillSpam.C = v end })
+SkillTab:CreateToggle({ Name = "Auto B", CurrentValue = false, Callback = function(v) _G.SkillSpam.B = v end })
+SkillTab:CreateToggle({ Name = "Auto Transform", CurrentValue = false, Callback = function(v) _G.AutoTransform = v end })
+
+-- // Tab 4: Misc
+MiscTab:CreateButton({
+    Name = "Reset Character",
+    Callback = function()
+         if player.Character and player.Character:FindFirstChild("Humanoid") then
+            player.Character.Humanoid.Health = 0
+        end
+     end    
+})
+
+-- // Logic Loops (ทำงานอยู่เบื้องหลังเหมือนเดิม)
+
+-- NoClip
 RunService.Stepped:Connect(function()
     if _G.AutoWarpEnabled then
         local char = player.Character
@@ -161,8 +260,6 @@ RunService.Stepped:Connect(function()
         end
     end
 end)
-
--- // Logic Loops
 
 -- Skill Spam
 task.spawn(function()
@@ -181,7 +278,7 @@ task.spawn(function()
     end
 end)
 
--- Smart Auto Equip (Fixed Logic)
+-- Smart Equip (Logic เดิม แต่ใช้ Blacklist จาก Rayfield)
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
@@ -189,7 +286,6 @@ task.spawn(function()
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
                 
-                -- ถ้าไม่ได้ถือของอยู่ ให้หาของมาถือ
                 if not currentTool then
                     local backpack = player:FindFirstChild("Backpack")
                     if backpack then
@@ -197,7 +293,7 @@ task.spawn(function()
                             if tool:IsA("Tool") then
                                 local isBlacklisted = false
                                 
-                                -- Check Blacklist
+                                -- เช็คจาก _G.EquipBlacklist (ซึ่งตอนนี้เป็น Table จาก Rayfield แล้ว)
                                 if _G.EquipBlacklist and type(_G.EquipBlacklist) == "table" then
                                     for _, blockedName in pairs(_G.EquipBlacklist) do
                                         if tool.Name == blockedName then
@@ -207,7 +303,6 @@ task.spawn(function()
                                     end
                                 end
                                 
-                                -- ถ้าไม่อยู่ใน Blacklist ให้ถือเลย
                                 if not isBlacklisted then
                                     char.Humanoid:EquipTool(tool)
                                     break 
@@ -272,10 +367,9 @@ task.spawn(function()
              
             if root then
                 if target and target:FindFirstChild("HumanoidRootPart") then
-                    -- [[ วาร์ปไปตี ]] --
                     local mobRoot = target.HumanoidRootPart
                     local finalCF
-                       
+                        
                     if _G.AttackPosition == "Top" then
                         finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
                     elseif _G.AttackPosition == "Bottom" then
@@ -284,13 +378,12 @@ task.spawn(function()
                         local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
                         finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
                     end
-                       
+                        
                     if finalCF then
                         root.CFrame = finalCF
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     end
                 else
-                    -- [[ Patrol (วนจุดเกิด) ]] --
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -308,89 +401,9 @@ task.spawn(function()
     end
 end)
 
--- // UI SETUP
-local MainTab = Window:MakeTab({ Name = "Auto Farm", Icon = "rbxassetid://4483345998", PremiumOnly = false })
-
-MainTab:AddToggle({
-    Name = "Auto Warp + Kill (with Patrol)",
-    Default = false,
-    Callback = function(Value) _G.AutoWarpEnabled = Value end   
+Rayfield:Notify({
+    Title = "Script Loaded",
+    Content = "Ben 10 Fix loaded successfully!",
+    Duration = 5,
+    Image = 4483345998,
 })
-
-MainTab:AddDropdown({
-    Name = "Attack Position",
-    Default = "Top",
-    Options = {"Top", "Bottom", "Side"},
-    Callback = function(Value) _G.AttackPosition = Value end   
-})
-
-MainTab:AddSlider({
-    Name = "Distance", Min = 0, Max = 20, Default = 6, Increment = 1, ValueName = "Studs",
-    Callback = function(Value) _G.HeightAboveHead = Value end   
-})
-
-MainTab:AddSlider({
-    Name = "Patrol Wait Time", Min = 0, Max = 10, Default = 2, Increment = 0.5, ValueName = "Secs",
-    Callback = function(Value) _G.PatrolWaitTime = Value end,
-    Description = "Time to wait at each spawn point if no mobs found"
-})
-
-local CombatTab = Window:MakeTab({ Name = "Combat & Items", Icon = "rbxassetid://4483345998", PremiumOnly = false })
-
-CombatTab:AddToggle({
-    Name = "Auto Smart Equip Tool", 
-    Default = false, 
-    Callback = function(Value) _G.SmartEquipEnabled = Value end,
-    Description = "Automatically equip items NOT in the blacklist"
-})
-
--- ** Dropdown Blacklist FIXED **
-local initialTools = getInventoryTools()
-local ToolDropdown
-
-ToolDropdown = CombatTab:AddDropdown({
-    Name = "Blacklist Items (Multi-Select)",
-    Default = {}, -- สำคัญ: ต้องเป็น Table เปล่าสำหรับ Multi
-    Options = initialTools,
-    Multi = true, -- เปิดโหมดเลือกหลายอัน
-    Callback = function(Value)
-        -- อัปเดต Table Blacklist
-        _G.EquipBlacklist = Value
-        
-        -- Debug: เช็คว่าใน Table มีอะไรบ้าง
-        if type(Value) == "table" then
-            print("Blacklist Updated: " .. table.concat(Value, ", "))
-        else
-            print("Dropdown Error: Got single value instead of table")
-        end
-    end
-})
-
-CombatTab:AddButton({
-    Name = "Refresh Tool List",
-    Callback = function()
-        local newTools = getInventoryTools()
-        ToolDropdown:Refresh(newTools, true) -- Refresh รายการโดยพยายามเก็บค่าเดิมไว้
-    end,
-    Description = "Click this if you got new items"
-})
-
-CombatTab:AddToggle({ Name = "Enable Skills", Default = false, Callback = function(v) _G.SkillSpamEnabled = v end })
-CombatTab:AddToggle({ Name = "Auto Z", Default = false, Callback = function(v) _G.SkillSpam.Z = v end })
-CombatTab:AddToggle({ Name = "Auto X", Default = false, Callback = function(v) _G.SkillSpam.X = v end })
-CombatTab:AddToggle({ Name = "Auto C", Default = false, Callback = function(v) _G.SkillSpam.C = v end })
-CombatTab:AddToggle({ Name = "Auto B", Default = false, Callback = function(v) _G.SkillSpam.B = v end })
-CombatTab:AddToggle({ Name = "Auto Transform", Default = false, Callback = function(v) _G.AutoTransform = v end })
-
-local MiscTab = Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://4483345998", PremiumOnly = false })
-
-MiscTab:AddButton({
-    Name = "Reset Character",
-    Callback = function()
-         if player.Character and player.Character:FindFirstChild("Humanoid") then
-            player.Character.Humanoid.Health = 0
-        end
-     end    
-})
-
-OrionLib:Init()
