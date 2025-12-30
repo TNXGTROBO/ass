@@ -1,9 +1,10 @@
 --[[
-    Ben 10 Optimized Script [Fluent UI Version] - MERGED LOGIC
-    Fixes:
-    - Moved Auto Transform & Skills INSIDE Auto Warp loop.
-    - Prioritizes Transformation BEFORE Attacking.
-    - Fixed V press but no C press issue.
+    Ben 10 Optimized Script [Fluent UI] - FIXED & MERGED
+    Update Log:
+    - Merged ALL logic into one single Master Loop.
+    - Transform Priority: Checks if Human -> Spams C -> Only then Attacks.
+    - Patrol Fix: Now correctly cycles through 7 spawn points if no target is found.
+    - Skill Fix: Skills fire only when near the target.
 ]]
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -27,7 +28,7 @@ _G.SmartEquipEnabled = false
 _G.EquipBlacklist = {} 
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
-_G.PatrolWaitTime = 2 
+_G.PatrolWaitTime = 1.5 -- Reduced default wait time for snappier patrol
 
 -- // Logic Data
 local spawnPoints = {
@@ -41,7 +42,6 @@ local spawnPoints = {
 }
 local currentPatrolIndex = 1
 local lastPatrolTime = 0
-local isTransforming = false -- Debounce variable for transformation
 
 local mobPatterns = {
     "ROBOTINVASIONEVENT", 
@@ -51,16 +51,15 @@ local mobPatterns = {
     "Criminal", 
     "DNAlien",  
     "Knight",
-    "Satis"
+    "Satis",
+    "Boss" -- Added general Boss keyword
 }
 
 -- // Helper Functions
-local function pressKeyReal(keyCode)
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-        task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-    end)
+local function pressKey(keyCode)
+    VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
 end
 
 local function getCombatHandler()
@@ -75,6 +74,17 @@ end
 
 local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function isHuman()
+    local char = player.Character
+    if not char then return false end
+    -- Check Attribute (Most reliable) or Name
+    local alienAttr = char:GetAttribute("Alien")
+    if alienAttr == "Human" or alienAttr == nil then
+        return true
+    end
+    return false
 end
 
 local function getInventoryTools()
@@ -101,20 +111,23 @@ end
 
 local function FindTarget()
     local closest = nil
-    local maxDist = 3000 
+    local maxDist = 5000 -- Search huge range
     local root = getRoot()
     if not root then return nil end
 
     for _, folder in pairs(Workspace:GetChildren()) do
         if folder:IsA("Model") and folder:FindFirstChild("HumanoidRootPart") and folder:FindFirstChild("Humanoid") and folder.Humanoid.Health > 0 then
             local name = folder.Name
-            for _, pattern in ipairs(mobPatterns) do
-                if string.find(name, pattern) or string.match(name, pattern) then
-                      local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
-                      if dist < maxDist then
-                          maxDist = dist
-                          closest = folder
-                      end
+            -- Don't target self
+            if name ~= player.Name then
+                for _, pattern in ipairs(mobPatterns) do
+                    if string.find(name, pattern) or string.match(name, pattern) then
+                          local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
+                          if dist < maxDist then
+                              maxDist = dist
+                              closest = folder
+                          end
+                    end
                 end
             end
         end
@@ -124,8 +137,8 @@ end
 
 -- // UI Window Setup
 local Window = Fluent:CreateWindow({
-    Title = "Ben 10 Fix (Merged Logic)",
-    SubTitle = "Auto Farm & Patrol",
+    Title = "Ben 10 Fixed (Merged Logic)",
+    SubTitle = "Transform -> Warp -> Kill",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true, 
@@ -144,7 +157,7 @@ local Options = Fluent.Options
 
 -- [[ MAIN TAB ]] --
 
-local ToggleAutoWarp = Tabs.Main:AddToggle("AutoWarp", {Title = "Auto Warp + Kill (Patrol)", Default = false })
+local ToggleAutoWarp = Tabs.Main:AddToggle("AutoWarp", {Title = "Enable Auto Farm (Loop)", Default = false })
 ToggleAutoWarp:OnChanged(function()
     _G.AutoWarpEnabled = Options.AutoWarp.Value
 end)
@@ -173,8 +186,8 @@ local SliderDist = Tabs.Main:AddSlider("Distance", {
 
 local SliderPatrol = Tabs.Main:AddSlider("PatrolWait", {
     Title = "Patrol Wait Time",
-    Description = "Time to wait at spawn point",
-    Default = 2,
+    Description = "Time before warping to next spawn if no mobs",
+    Default = 1.5,
     Min = 0,
     Max = 10,
     Rounding = 1,
@@ -190,15 +203,10 @@ ToggleSmartEquip:OnChanged(function()
     _G.SmartEquipEnabled = Options.SmartEquip.Value
 end)
 
-Tabs.Combat:AddParagraph({
-    Title = "Blacklist Instructions",
-    Content = "Select items you DO NOT want the script to equip.\nPress 'Refresh Tool List' if you picked up new items."
-})
-
 local currentTools = getInventoryTools()
 local MultiDropdownBlacklist = Tabs.Combat:AddDropdown("BlacklistDrop", {
     Title = "Blacklist Items",
-    Description = "Multi-Select Supported",
+    Description = "Select items to NOT equip",
     Values = currentTools,
     Multi = true,
     Default = {},
@@ -207,16 +215,13 @@ local MultiDropdownBlacklist = Tabs.Combat:AddDropdown("BlacklistDrop", {
 MultiDropdownBlacklist:OnChanged(function(Value)
     local list = {}
     for key, state in pairs(Value) do
-        if state then
-            table.insert(list, key)
-        end
+        if state then table.insert(list, key) end
     end
     _G.EquipBlacklist = list
 end)
 
 Tabs.Combat:AddButton({
     Title = "Refresh Tool List",
-    Description = "Update dropdown with current inventory",
     Callback = function()
         local newTools = getInventoryTools()
         MultiDropdownBlacklist:SetValues(newTools)
@@ -224,22 +229,24 @@ Tabs.Combat:AddButton({
     end
 })
 
+Tabs.Combat:AddSection("Auto Skills")
+
 local ToggleSkillSpam = Tabs.Combat:AddToggle("SkillSpam", {Title = "Enable Auto Skills", Default = false })
 ToggleSkillSpam:OnChanged(function() _G.SkillSpamEnabled = Options.SkillSpam.Value end)
 
-local ToggleZ = Tabs.Combat:AddToggle("AutoZ", {Title = "Auto Z", Default = false })
+local ToggleZ = Tabs.Combat:AddToggle("AutoZ", {Title = "Use Z", Default = false })
 ToggleZ:OnChanged(function() _G.SkillSpam.Z = Options.AutoZ.Value end)
 
-local ToggleX = Tabs.Combat:AddToggle("AutoX", {Title = "Auto X", Default = false })
+local ToggleX = Tabs.Combat:AddToggle("AutoX", {Title = "Use X", Default = false })
 ToggleX:OnChanged(function() _G.SkillSpam.X = Options.AutoX.Value end)
 
-local ToggleC = Tabs.Combat:AddToggle("AutoC", {Title = "Auto C", Default = false })
+local ToggleC = Tabs.Combat:AddToggle("AutoC", {Title = "Use C", Default = false })
 ToggleC:OnChanged(function() _G.SkillSpam.C = Options.AutoC.Value end)
 
-local ToggleB = Tabs.Combat:AddToggle("AutoB", {Title = "Auto B", Default = false })
+local ToggleB = Tabs.Combat:AddToggle("AutoB", {Title = "Use B", Default = false })
 ToggleB:OnChanged(function() _G.SkillSpam.B = Options.AutoB.Value end)
 
-local ToggleTransform = Tabs.Combat:AddToggle("AutoTrans", {Title = "Auto Transform (Human -> Alien)", Default = false })
+local ToggleTransform = Tabs.Combat:AddToggle("AutoTrans", {Title = "Auto Transform (Priority)", Default = false })
 ToggleTransform:OnChanged(function() _G.AutoTransform = Options.AutoTrans.Value end)
 
 
@@ -255,9 +262,9 @@ Tabs.Misc:AddButton({
 })
 
 
--- [[ LOGIC LOOPS (OPTIMIZED & MERGED) ]] --
+-- [[ LOGIC LOOPS ]] --
 
--- NoClip
+-- 1. NoClip Loop (Prevents getting stuck)
 RunService.Stepped:Connect(function()
     if _G.AutoWarpEnabled then
         local char = player.Character
@@ -271,29 +278,24 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Smart Equip (Standalone)
+-- 2. Smart Equip (Passive)
 task.spawn(function()
     while true do
-        if _G.SmartEquipEnabled and not isTransforming then
+        if _G.SmartEquipEnabled then
             local char = player.Character
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
-                
                 if not currentTool then
                     local backpack = player:FindFirstChild("Backpack")
                     if backpack then
                         for _, tool in pairs(backpack:GetChildren()) do
                             if tool:IsA("Tool") then
                                 local isBlacklisted = false
-                                if _G.EquipBlacklist and type(_G.EquipBlacklist) == "table" then
+                                if _G.EquipBlacklist then
                                     for _, blockedName in pairs(_G.EquipBlacklist) do
-                                        if tool.Name == blockedName then
-                                            isBlacklisted = true
-                                            break
-                                        end
+                                        if tool.Name == blockedName then isBlacklisted = true break end
                                     end
                                 end
-                                
                                 if not isBlacklisted then
                                     char.Humanoid:EquipTool(tool)
                                     break 
@@ -308,100 +310,102 @@ task.spawn(function()
     end
 end)
 
--- [[ THE MASTER LOOP (Warp + Transform + Attack + Skills) ]] --
+-- 3. THE MASTER LOOP (Transform -> Warp -> Kill -> Patrol)
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
             local root = getRoot()
             local char = player.Character
             
-            -- Wait loop if actively transforming to prevent breaking animation
-            if isTransforming then
-                task.wait(0.5)
-            elseif root and char and char:FindFirstChild("Humanoid") then
+            if root and char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 
-                -- [[ 1. AUTO TRANSFORM LOGIC ]] --
-                -- Prioritize becoming an alien before engaging
-                local isHuman = char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")
-                
-                if _G.AutoTransform and isHuman then
-                    isTransforming = true
+                -- [[ STEP 1: PRIORITY TRANSFORM ]] --
+                if _G.AutoTransform and isHuman() then
+                    -- If we are human, STOP warping, STOP attacking. Just Transform.
+                    -- Logic: Press V once to open, Spam C to transform.
                     
-                    -- Sequence: V -> Wait -> C -> Wait -> C (Confirm)
-                    pressKeyReal(Enum.KeyCode.V)
-                    task.wait(0.5)
-                    pressKeyReal(Enum.KeyCode.C)
-                    task.wait(0.5)
-                    pressKeyReal(Enum.KeyCode.C)
+                    pressKey(Enum.KeyCode.V) -- Open Omnitrix
+                    task.wait(0.2)
+                    pressKey(Enum.KeyCode.C) -- Select/Transform
                     
-                    -- Wait for transformation to likely finish
-                    task.wait(3) 
-                    isTransforming = false
-                
+                    -- Quick loop to spam C
+                    for i = 1, 5 do
+                        pressKey(Enum.KeyCode.C)
+                        task.wait(0.1)
+                    end
+                    
+                    task.wait(0.5) -- Wait for animation slightly
+                    -- Continue loop will restart logic to check if we are still human
+                    
                 else
-                    -- [[ 2. TARGET FINDING & COMBAT ]] --
+                    -- [[ STEP 2: FIND TARGET ]] --
                     local target = FindTarget()
                     
                     if target and target:FindFirstChild("HumanoidRootPart") then
-                        -- A. WARP TO TARGET
+                        -- [[ STEP 3: WARP & KILL ]] --
                         local mobRoot = target.HumanoidRootPart
                         local finalCF
                         
+                        -- Calculate Position
                         if _G.AttackPosition == "Top" then
                             finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
                         elseif _G.AttackPosition == "Bottom" then
                             finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
-                        elseif _G.AttackPosition == "Side" then
+                        else -- Side
                             local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
                             finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
                         end
                         
+                        -- Apply Warp
                         if finalCF then
                             root.CFrame = finalCF
-                            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                            root.AssemblyLinearVelocity = Vector3.new(0,0,0) -- Stop falling
                         end
-
-                        -- B. ATTACK & SKILLS (Only if close)
-                        if (root.Position - mobRoot.Position).Magnitude < 50 then
+                        
+                        -- Attack Logic (Only if close)
+                        if (root.Position - mobRoot.Position).Magnitude < 60 then
                             
-                            -- Basic Attack
+                            -- Regular Attack
                             local atk, anims = getCombatHandler()
                             if atk then
                                 pcall(function()
                                     atk:FireServer("Attack", false, anims)
-                                    atk:FireServer("HeavyAttack", false, anims)
                                 end)
                             else
                                 VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-                                task.wait(0.05)
+                                task.wait()
                                 VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
                             end
 
-                            -- Skills (Merged here so it won't run if Human/Transforming)
+                            -- Auto Skills (Embedded inside Attack)
                             if _G.SkillSpamEnabled then
-                                if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
-                                if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
-                                if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
-                                if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
+                                if _G.SkillSpam.Z then pressKey(Enum.KeyCode.Z) end
+                                if _G.SkillSpam.X then pressKey(Enum.KeyCode.X) end
+                                if _G.SkillSpam.C then pressKey(Enum.KeyCode.C) end
+                                if _G.SkillSpam.B then pressKey(Enum.KeyCode.B) end
                             end
                         end
+                        
                     else
-                        -- [[ 3. PATROL LOGIC (No Target) ]] --
+                        -- [[ STEP 4: PATROL (If No Target Found) ]] --
                         if tick() - lastPatrolTime > _G.PatrolWaitTime then
+                            -- Warp to Patrol Point
                             root.CFrame = spawnPoints[currentPatrolIndex]
-                            root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                                
-                            lastPatrolTime = tick()
+                            root.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                            
+                            -- Increment Index
                             currentPatrolIndex = currentPatrolIndex + 1
                             if currentPatrolIndex > #spawnPoints then
                                 currentPatrolIndex = 1
                             end
+                            
+                            lastPatrolTime = tick()
                         end
                     end
                 end
             end
         end
-        task.wait() -- Fast tick
+        task.wait() -- Run fast but yield to prevent crash
     end
 end)
 
@@ -410,8 +414,8 @@ SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentBen10v2")
-SaveManager:SetFolder("FluentBen10v2/Configs")
+InterfaceManager:SetFolder("FluentBen10Fixed")
+SaveManager:SetFolder("FluentBen10Fixed/Configs")
 
 InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
@@ -419,7 +423,7 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 Window:SelectTab(1)
 
 Fluent:Notify({
-    Title = "Script Updated",
-    Content = "Merged Transform/Skills into Auto Warp Loop.",
+    Title = "Ben 10 Script Loaded",
+    Content = "Logic Merged. Enable Auto Farm to Start.",
     Duration = 5
 })
