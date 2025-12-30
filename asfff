@@ -1,7 +1,7 @@
 --[[
-    Ben 10 Mobile Optimized Script [Smart Equip & Patrol Fix]
+    Ben 10 Mobile Optimized Script [Smart Equip & Patrol Fix + Blacklist]
     UI: Orion (Original)
-    Logic: Added 7-Point Patrol System
+    Logic: Added 7-Point Patrol System + Item Blacklist
 ]]
 
 -- รอให้เกมโหลดเสร็จ
@@ -27,7 +27,7 @@ local Window = OrionLib:MakeWindow({
     SaveConfig = true, 
     ConfigFolder = "Ben10Fixv3",
     IntroEnabled = true,
-    IntroText = "Patrol Logic Loaded"
+    IntroText = "Patrol & Blacklist Loaded"
 })
 
 -- // Services
@@ -44,11 +44,12 @@ _G.AutoWarpEnabled = false
 _G.AutoTransform = false
 _G.AttackPosition = "Top"
 _G.SmartEquipEnabled = false 
+_G.EquipBlacklist = {} -- เก็บรายชื่อไอเทมที่จะไม่ถือ
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
 _G.PatrolWaitTime = 2 -- เวลารอที่จุดเกิด (วินาที)
 
--- // จุดเกิด 7 จุด (Spawn Points) จากสคริปต์ที่สอง
+-- // จุดเกิด 7 จุด (Spawn Points)
 local spawnPoints = {
     CFrame.new(1836.52673, 11.0042171, 361.953735),
     CFrame.new(1175.94763, -6.92456007, 770.222107),
@@ -96,6 +97,26 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
+-- ฟังก์ชันดึงชื่อไอเทมในตัวเพื่อใส่ใน Dropdown
+local function getInventoryTools()
+    local tools = {}
+    if player.Backpack then
+        for _, v in pairs(player.Backpack:GetChildren()) do
+            if v:IsA("Tool") and not table.find(tools, v.Name) then
+                table.insert(tools, v.Name)
+            end
+        end
+    end
+    if player.Character then
+        for _, v in pairs(player.Character:GetChildren()) do
+            if v:IsA("Tool") and not table.find(tools, v.Name) then
+                table.insert(tools, v.Name)
+            end
+        end
+    end
+    return tools
+end
+
 -- ฟังก์ชันหาเป้าหมาย
 local function FindTarget()
     local closest = nil
@@ -108,11 +129,11 @@ local function FindTarget()
             local name = folder.Name
             for _, pattern in ipairs(mobPatterns) do
                 if string.find(name, pattern) or string.match(name, pattern) then
-                     local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
-                     if dist < maxDist then
-                         maxDist = dist
-                         closest = folder
-                     end
+                      local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
+                      if dist < maxDist then
+                          maxDist = dist
+                          closest = folder
+                      end
                 end
             end
         end
@@ -153,19 +174,39 @@ task.spawn(function()
     end
 end)
 
--- Smart Auto Equip
+-- ** ส่วนที่แก้ไข: Smart Auto Equip แบบมี Blacklist **
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
             local char = player.Character
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
+                
+                -- ถ้ายังไม่ได้ถือของ ให้หาของในกระเป๋ามาถือ
                 if not currentTool then
                     local backpack = player:FindFirstChild("Backpack")
                     if backpack then
-                        local toolToEquip = backpack:FindFirstChildWhichIsA("Tool")
-                        if toolToEquip then
-                            char.Humanoid:EquipTool(toolToEquip)
+                        local foundValidTool = false
+                        
+                        -- วนลูปหาของในกระเป๋า
+                        for _, tool in pairs(backpack:GetChildren()) do
+                            if tool:IsA("Tool") then
+                                -- เช็คว่าชื่อของนี้ อยู่ใน Blacklist หรือไม่
+                                local isBlacklisted = false
+                                for _, blacklistedName in pairs(_G.EquipBlacklist) do
+                                    if tool.Name == blacklistedName then
+                                        isBlacklisted = true
+                                        break
+                                    end
+                                end
+                                
+                                -- ถ้าไม่อยู่ใน Blacklist ให้ถือเลย
+                                if not isBlacklisted then
+                                    char.Humanoid:EquipTool(tool)
+                                    foundValidTool = true
+                                    break -- เจอของดีแล้ว หยุดหา
+                                end
+                            end
                         end
                     end
                 end
@@ -197,7 +238,7 @@ end)
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
-            local target = FindTarget() -- เช็คก่อนว่ามีเป้าหมายไหมค่อยตี
+            local target = FindTarget() 
             if target then
                 local atk, anims = getCombatHandler()
                 if atk then
@@ -216,19 +257,19 @@ task.spawn(function()
     end
 end)
 
--- ** ส่วนที่แก้ไขใหม่: Auto Warp + Patrol Logic **
+-- Auto Warp + Patrol Logic
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
             local root = getRoot()
             local target = FindTarget()
-            
+             
             if root then
                 if target and target:FindFirstChild("HumanoidRootPart") then
-                    -- [[ กรณีเจอเป้าหมาย: วาร์ปไปตีตามปกติ ]] --
+                    -- [[ วาร์ปไปตี ]] --
                     local mobRoot = target.HumanoidRootPart
                     local finalCF
-                    
+                     
                     if _G.AttackPosition == "Top" then
                         finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
                     elseif _G.AttackPosition == "Bottom" then
@@ -237,19 +278,17 @@ task.spawn(function()
                         local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
                         finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
                     end
-                    
+                     
                     if finalCF then
                         root.CFrame = finalCF
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     end
                 else
-                    -- [[ กรณีไม่เจอเป้าหมาย: เข้าโหมด Patrol (วนจุดเกิด) ]] --
+                    -- [[ Patrol (วนจุดเกิด) ]] --
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
-                        -- วาร์ปไปจุดเกิดปัจจุบัน
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                        
-                        -- อัปเดตเวลาและลำดับ
+                         
                         lastPatrolTime = tick()
                         currentPatrolIndex = currentPatrolIndex + 1
                         if currentPatrolIndex > #spawnPoints then
@@ -259,7 +298,6 @@ task.spawn(function()
                 end
             end
         end
-        -- ใช้ task.wait เล็กน้อยเพื่อไม่ให้กินทรัพยากรมากเกินไป แต่ยังวาร์ปเนียน
         task.wait() 
     end
 end)
@@ -270,22 +308,21 @@ local MainTab = Window:MakeTab({ Name = "Auto Farm", Icon = "rbxassetid://448334
 MainTab:AddToggle({
     Name = "Auto Warp + Kill (with Patrol)",
     Default = false,
-    Callback = function(Value) _G.AutoWarpEnabled = Value end    
+    Callback = function(Value) _G.AutoWarpEnabled = Value end   
 })
 
 MainTab:AddDropdown({
     Name = "Attack Position",
     Default = "Top",
     Options = {"Top", "Bottom", "Side"},
-    Callback = function(Value) _G.AttackPosition = Value end    
+    Callback = function(Value) _G.AttackPosition = Value end   
 })
 
 MainTab:AddSlider({
     Name = "Distance", Min = 0, Max = 20, Default = 6, Increment = 1, ValueName = "Studs",
-    Callback = function(Value) _G.HeightAboveHead = Value end    
+    Callback = function(Value) _G.HeightAboveHead = Value end   
 })
 
--- เพิ่ม Slider สำหรับปรับความเร็วในการย้ายจุดเกิด
 MainTab:AddSlider({
     Name = "Patrol Wait Time", Min = 0, Max = 10, Default = 2, Increment = 0.5, ValueName = "Secs",
     Callback = function(Value) _G.PatrolWaitTime = Value end,
@@ -298,7 +335,28 @@ CombatTab:AddToggle({
     Name = "Auto Smart Equip Tool", 
     Default = false, 
     Callback = function(Value) _G.SmartEquipEnabled = Value end,
-    Description = "Automatically finds and holds your weapon/watch"
+    Description = "Automatically equip items NOT in the blacklist"
+})
+
+-- ** ส่วน Dropdown Blacklist **
+local ToolDropdown
+ToolDropdown = CombatTab:AddDropdown({
+    Name = "Blacklist Items (Don't Equip)",
+    Default = {},
+    Options = getInventoryTools(),
+    Multi = true, -- ติ๊กได้หลายอัน
+    Callback = function(Value)
+        _G.EquipBlacklist = Value
+        print("Updated Blacklist:", table.concat(Value, ", "))
+    end
+})
+
+CombatTab:AddButton({
+    Name = "Refresh Tool List",
+    Callback = function()
+        ToolDropdown:Refresh(getInventoryTools(), true)
+    end,
+    Description = "Click this if you got new items and they don't show up"
 })
 
 CombatTab:AddToggle({ Name = "Enable Skills", Default = false, Callback = function(v) _G.SkillSpamEnabled = v end })
