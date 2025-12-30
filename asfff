@@ -1,0 +1,295 @@
+--[[
+    Ben 10 Mobile Optimized Script [Fixed Transform Logic]
+    Fixed by: Gemini
+]]
+
+-- รอให้เกมโหลดเสร็จก่อนค่อยรัน
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+task.wait(2)
+
+print("Starting Script...")
+
+-- // Load Library
+local success, OrionLib = pcall(function()
+    return loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
+end)
+
+if not success or not OrionLib then
+    warn("Failed to load Orion Library!")
+    OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))()
+end
+
+local Window = OrionLib:MakeWindow({
+    Name = "Ben 10 Fix Transform (Delta)", 
+    HidePremium = false, 
+    SaveConfig = true, 
+    ConfigFolder = "Ben10Fix",
+    IntroEnabled = true,
+    IntroText = "Fixed Version Loaded"
+})
+
+-- // Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+
+-- // Variables & Config
+_G.HeightAboveHead = 6
+_G.AutoWarpEnabled = false
+_G.AutoTransform = false
+_G.AttackPosition = "Top"
+_G.AutoEquipEnabled = false
+_G.SelectedWeapon = "None"
+_G.SkillSpam = { Z = false, X = false, C = false, B = false }
+_G.SkillSpamEnabled = false
+
+local mobPatterns = { "ROBOTINVASIONEVENT:*", "AMBIENT_MUGGING:*", "AMBIENT_ROBBERY:*", "AMBIENT_TETRA_BRAWL:*"}
+
+-- // Helper Functions
+local function pressKeyReal(keyCode)
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        task.wait(0.1) -- เพิ่มเวลาการกดค้างนิดนึงเพื่อให้เกมรับรู้
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end)
+end
+
+local function getCombatHandler()
+    local backpack = player:FindFirstChild("Backpack")
+    if not backpack then return nil, nil end
+    local handler = backpack:FindFirstChild("CombatHandler")
+    if handler then
+        return handler:FindFirstChild("Attack"), handler:FindFirstChild("Combat") and handler.Combat:FindFirstChild("Animations")
+    end
+    return nil, nil
+end
+
+local function getRoot()
+    return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function FindTarget()
+    local closest = nil
+    local maxDist = 2000
+    local root = getRoot()
+    if not root then return nil end
+
+    for _, folder in pairs(Workspace:GetChildren()) do
+        for _, pattern in ipairs(mobPatterns) do
+            if (pattern:sub(-1) == "*" and folder.Name:sub(1, #pattern - 1) == pattern:sub(1, -2)) or folder.Name == pattern then
+                for _, obj in pairs(folder:GetChildren()) do
+                    if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
+                        local dist = (root.Position - obj.HumanoidRootPart.Position).Magnitude
+                        if dist < maxDist then
+                            maxDist = dist
+                            closest = obj
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function GetToolNames()
+    local tools = {}
+    local locations = {player:FindFirstChild("Backpack"), player.Character}
+    for _, loc in pairs(locations) do
+        if loc then
+            for _, item in pairs(loc:GetChildren()) do
+                if item:IsA("Tool") and not table.find(tools, item.Name) then 
+                    table.insert(tools, item.Name) 
+                end
+            end
+        end
+    end
+    if #tools == 0 then return {"None"} end
+    return tools
+end
+
+-- // NoClip System
+RunService.Stepped:Connect(function()
+    if _G.AutoWarpEnabled then
+        local char = player.Character
+        if char then
+            for _, part in pairs(char:GetChildren()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- // Logic Loops
+
+-- Skill Spam
+task.spawn(function()
+    while true do
+        if _G.SkillSpamEnabled then
+            local target = FindTarget()
+            local root = getRoot()
+            if target and root and (root.Position - target.HumanoidRootPart.Position).Magnitude < 40 then
+                if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
+                if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
+                if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
+                if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+-- Auto Equip
+task.spawn(function()
+    while true do
+        if _G.AutoEquipEnabled and _G.SelectedWeapon ~= "None" then
+            local char = player.Character
+            if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+                if not char:FindFirstChild(_G.SelectedWeapon) then
+                    local tool = player.Backpack:FindFirstChild(_G.SelectedWeapon)
+                    if tool then char.Humanoid:EquipTool(tool) end
+                end
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+-- [[ ส่วนที่แก้: Auto Transform ]] --
+task.spawn(function()
+    while true do
+        if _G.AutoTransform then
+            local char = player.Character
+            -- เช็คว่าเป็นร่างคนหรือไม่
+            if char and (char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")) then
+                
+                -- กด V เพื่อเปิดนาฬิกา
+                pressKeyReal(Enum.KeyCode.V)
+                
+                -- แก้ไข: รอให้นานขึ้น (จาก 1.5 เป็น 2.5 วินาที) เผื่ออนิเมชั่นช้าหรือแลค
+                task.wait(2.5) 
+                
+                -- แก้ไข: กดย้ำปุ่ม C สองรอบเพื่อให้ชัวร์ว่าแปลงร่าง
+                pressKeyReal(Enum.KeyCode.C)
+                task.wait(0.2)
+                pressKeyReal(Enum.KeyCode.C)
+                
+                -- รอให้ Cooldown การแปลงร่างเสร็จ
+                task.wait(6)
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+-- Auto Attack
+task.spawn(function()
+    while true do
+        if _G.AutoWarpEnabled then
+            local atk, anims = getCombatHandler()
+            if atk and FindTarget() then
+                pcall(function()
+                    atk:FireServer("Attack", false, anims)
+                    atk:FireServer("HeavyAttack", false, anims)
+                end)
+            end
+        end
+        task.wait(0.15)
+    end
+end)
+
+-- Auto Warp Logic
+RunService.Heartbeat:Connect(function()
+    if _G.AutoWarpEnabled then
+        local root = getRoot()
+        local target = FindTarget()
+        
+        if target and root then
+            local mobRoot = target.HumanoidRootPart
+            local finalCF
+            
+            if _G.AttackPosition == "Top" then
+                finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
+            elseif _G.AttackPosition == "Bottom" then
+                finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
+            elseif _G.AttackPosition == "Side" then
+                local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
+                finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
+            end
+            
+            if finalCF then
+                root.CFrame = finalCF
+                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+-- // UI SETUP
+local MainTab = Window:MakeTab({ Name = "Auto Farm", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+
+MainTab:AddToggle({
+    Name = "Auto Warp + Kill",
+    Default = false,
+    Callback = function(Value) _G.AutoWarpEnabled = Value end    
+})
+
+MainTab:AddDropdown({
+    Name = "Attack Position",
+    Default = "Top",
+    Options = {"Top", "Bottom", "Side"},
+    Callback = function(Value) _G.AttackPosition = Value end    
+})
+
+MainTab:AddSlider({
+    Name = "Distance", Min = 0, Max = 20, Default = 6, Increment = 1, ValueName = "Studs",
+    Callback = function(Value) _G.HeightAboveHead = Value end    
+})
+
+local CombatTab = Window:MakeTab({ Name = "Combat", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+
+CombatTab:AddToggle({ Name = "Enable Skills", Default = false, Callback = function(v) _G.SkillSpamEnabled = v end })
+CombatTab:AddToggle({ Name = "Auto Z", Default = false, Callback = function(v) _G.SkillSpam.Z = v end })
+CombatTab:AddToggle({ Name = "Auto X", Default = false, Callback = function(v) _G.SkillSpam.X = v end })
+CombatTab:AddToggle({ Name = "Auto C", Default = false, Callback = function(v) _G.SkillSpam.C = v end })
+CombatTab:AddToggle({ Name = "Auto B", Default = false, Callback = function(v) _G.SkillSpam.B = v end })
+CombatTab:AddToggle({ Name = "Auto Transform", Default = false, Callback = function(v) _G.AutoTransform = v end })
+
+local ItemTab = Window:MakeTab({ Name = "Items", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+
+local WeaponDropdown = ItemTab:AddDropdown({
+    Name = "Select Weapon",
+    Default = "None",
+    Options = GetToolNames(),
+    Callback = function(Value) _G.SelectedWeapon = Value end    
+})
+
+ItemTab:AddButton({
+    Name = "Refresh Weapon List",
+    Callback = function() WeaponDropdown:Refresh(GetToolNames(), true) end    
+})
+
+ItemTab:AddToggle({
+    Name = "Auto Hold Weapon", Default = false, Callback = function(Value) _G.AutoEquipEnabled = Value end    
+})
+
+local MiscTab = Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+
+MiscTab:AddButton({
+    Name = "Reset Character",
+    Callback = function()
+         if player.Character and player.Character:FindFirstChild("Humanoid") then
+            player.Character.Humanoid.Health = 0
+        end
+     end    
+})
+
+OrionLib:Init()
+print("Script Loaded!")
