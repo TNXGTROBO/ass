@@ -1,11 +1,11 @@
 --[[
-    Ben 10 Optimized Script [Fluent UI Version] - Modified Request
-    UI: Fluent (Stable & Mobile Friendly)
+    Ben 10 Optimized Script [FIXED WARP VERSION]
     
-    MODIFICATIONS:
-    1. Merged Auto Transform & Auto Skill into Warp Loop.
-    2. Priority Target is strictly "Satis".
-    3. Auto Transform now spams 'C' key.
+    FIX CHANGES:
+    1. ✅ แก้ FindTarget() ให้ค้นหาในโฟลเดอร์ที่ถูกต้อง
+    2. ✅ รวม NoClip เข้า Main Loop
+    3. ✅ ปรับ Transform ให้กด V+C แค่ครั้งเดียวต่อรอบ
+    4. ✅ เพิ่ม Debug เพื่อตรวจสอบการทำงาน
 ]]
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -20,7 +20,7 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 
--- // Config Variables (Global for Logic)
+-- // Config Variables
 _G.HeightAboveHead = 6
 _G.AutoWarpEnabled = false
 _G.AutoTransform = false
@@ -30,6 +30,7 @@ _G.EquipBlacklist = {}
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
 _G.PatrolWaitTime = 2 
+_G.DebugMode = false -- เปิดเพื่อดู log
 
 -- // Logic Data
 local spawnPoints = {
@@ -43,11 +44,11 @@ local spawnPoints = {
 }
 local currentPatrolIndex = 1
 local lastPatrolTime = 0
+local lastTransformTime = 0 -- ป้องกัน spam transform
 
--- Moved Satis to top logically, but FindTarget will handle the priority check
+-- ✅ แก้ไข: เพิ่ม mobPatterns ที่ใช้ใน FindTarget
 local mobPatterns = {
-    "Satis", -- Priority 1
-    "ROBOTINVASIONEVENT", 
+    "ROBOTINVASIONEVENT",
     "AMBIENT_MUGGING", 
     "AMBIENT_ROBBERY", 
     "AMBIENT_TETRA_BRAWL",
@@ -57,6 +58,12 @@ local mobPatterns = {
 }
 
 -- // Helper Functions
+local function debugPrint(msg)
+    if _G.DebugMode then
+        print("[DEBUG] " .. msg)
+    end
+end
+
 local function pressKeyReal(keyCode)
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
@@ -101,55 +108,71 @@ local function getInventoryTools()
     return tools
 end
 
+-- ✅ แก้ไข FindTarget ให้ค้นหาในโฟลเดอร์ที่ถูกต้อง
 local function FindTarget()
     local root = getRoot()
     if not root then return nil end
     local maxDist = 3000 
 
-    -- 1. Priority Check: Satis
+    -- 1. หา Satis ก่อน (Priority)
     local closestSatis = nil
     local shortestSatisDist = maxDist
 
     for _, folder in pairs(Workspace:GetChildren()) do
-        if folder:IsA("Model") and folder:FindFirstChild("HumanoidRootPart") and folder:FindFirstChild("Humanoid") and folder.Humanoid.Health > 0 then
-            if string.find(folder.Name, "Satis") then
-                local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
-                if dist < shortestSatisDist then
-                    shortestSatisDist = dist
-                    closestSatis = folder
-                end
-            end
-        end
-    end
-
-    if closestSatis then return closestSatis end -- Found Satis, return immediately
-
-    -- 2. General Check (If no Satis found)
-    local closest = nil
-    for _, folder in pairs(Workspace:GetChildren()) do
-        if folder:IsA("Model") and folder:FindFirstChild("HumanoidRootPart") and folder:FindFirstChild("Humanoid") and folder.Humanoid.Health > 0 then
-            local name = folder.Name
-            local isSatis = string.find(name, "Satis")
-            if not isSatis then -- Skip Satis here as we checked it above
-                for _, pattern in ipairs(mobPatterns) do
-                    if string.find(name, pattern) or string.match(name, pattern) then
-                          local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
-                          if dist < maxDist then
-                              maxDist = dist
-                              closest = folder
-                          end
+        if folder:IsA("Folder") or folder:IsA("Model") then
+            for _, mob in pairs(folder:GetChildren()) do
+                if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+                    if mob.Name == "Satis" then
+                        local dist = (root.Position - mob.HumanoidRootPart.Position).Magnitude
+                        if dist < shortestSatisDist then
+                            shortestSatisDist = dist
+                            closestSatis = mob
+                            debugPrint("Found Satis at distance: " .. dist)
+                        end
                     end
                 end
             end
         end
     end
+
+    if closestSatis then return closestSatis end
+
+    -- 2. หามอนอื่น ๆ ในโฟลเดอร์
+    local closest = nil
+    local closestDist = maxDist
+
+    for _, folder in pairs(Workspace:GetChildren()) do
+        -- ตรวจสอบว่าชื่อโฟลเดอร์ตรงกับ pattern ไหม
+        local folderMatch = false
+        for _, pattern in ipairs(mobPatterns) do
+            if string.find(folder.Name, pattern) then
+                folderMatch = true
+                break
+            end
+        end
+
+        if folderMatch then
+            debugPrint("Checking folder: " .. folder.Name)
+            for _, mob in pairs(folder:GetChildren()) do
+                if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChild("Humanoid") and mob.Humanoid.Health > 0 then
+                    local dist = (root.Position - mob.HumanoidRootPart.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closest = mob
+                        debugPrint("Found mob: " .. mob.Name .. " at distance: " .. dist)
+                    end
+                end
+            end
+        end
+    end
+
     return closest
 end
 
 -- // UI Window Setup
 local Window = Fluent:CreateWindow({
-    Title = "Ben 10 Fix (Merged Logic)",
-    SubTitle = "Auto Farm & Patrol",
+    Title = "Ben 10 Fixed Warp System",
+    SubTitle = "Auto Farm & Patrol (FIXED)",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true, 
@@ -171,6 +194,16 @@ local Options = Fluent.Options
 local ToggleAutoWarp = Tabs.Main:AddToggle("AutoWarp", {Title = "Auto Warp + Kill (Patrol)", Default = false })
 ToggleAutoWarp:OnChanged(function()
     _G.AutoWarpEnabled = Options.AutoWarp.Value
+    if _G.AutoWarpEnabled then
+        Fluent:Notify({Title = "Auto Warp", Content = "เปิดระบบแล้ว", Duration = 3})
+    else
+        Fluent:Notify({Title = "Auto Warp", Content = "ปิดระบบแล้ว", Duration = 3})
+    end
+end)
+
+local ToggleDebug = Tabs.Main:AddToggle("DebugMode", {Title = "Debug Mode (Show Logs)", Default = false })
+ToggleDebug:OnChanged(function()
+    _G.DebugMode = Options.DebugMode.Value
 end)
 
 local DropAttackPos = Tabs.Main:AddDropdown("AttackPos", {
@@ -266,7 +299,6 @@ ToggleB:OnChanged(function() _G.SkillSpam.B = Options.AutoB.Value end)
 local ToggleTransform = Tabs.Combat:AddToggle("AutoTrans", {Title = "Auto Transform (Human -> Alien)", Default = false })
 ToggleTransform:OnChanged(function() _G.AutoTransform = Options.AutoTrans.Value end)
 
-
 -- [[ MISC TAB ]] --
 
 Tabs.Misc:AddButton({
@@ -278,24 +310,9 @@ Tabs.Misc:AddButton({
     end
 })
 
-
 -- [[ LOGIC LOOPS ]] --
 
--- NoClip
-RunService.Stepped:Connect(function()
-    if _G.AutoWarpEnabled then
-        local char = player.Character
-        if char then
-            for _, part in pairs(char:GetChildren()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
-            end
-        end
-    end
-end)
-
--- Smart Equip (Kept Separate as it needs to run always)
+-- Smart Equip (Separate thread)
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
@@ -332,14 +349,13 @@ task.spawn(function()
     end
 end)
 
--- Auto Attack (Works when near mob)
+-- Auto Attack (Separate thread - only attacks when close)
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
             local target = FindTarget() 
             if target then
                 local root = getRoot()
-                -- Only attack if close enough
                 if root and (root.Position - target.HumanoidRootPart.Position).Magnitude < 30 then
                     local atk, anims = getCombatHandler()
                     if atk then
@@ -359,16 +375,28 @@ task.spawn(function()
     end
 end)
 
--- [[ MAIN LOOP: WARP, PATROL, SKILLS, TRANSFORM ]] --
--- Merged Logic as requested
+-- ✅ MAIN LOOP: WARP + PATROL + SKILLS + TRANSFORM + NOCLIP (ทุกอย่างในลูปเดียว)
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
             local root = getRoot()
+            local char = player.Character
+            
+            -- ✅ NoClip (รวมอยู่ในลูปหลัก)
+            if char then
+                for _, part in pairs(char:GetChildren()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                    end
+                end
+            end
+            
             local target = FindTarget()
               
             if root then
                 if target and target:FindFirstChild("HumanoidRootPart") then
+                    debugPrint("Warping to target: " .. target.Name)
+                    
                     -- [[ WARP TO KILL ]] --
                     local mobRoot = target.HumanoidRootPart
                     local finalCF
@@ -386,33 +414,29 @@ task.spawn(function()
                         root.CFrame = finalCF
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         
-                        -- [[ 1. AUTO TRANSFORM (Inside Warp) ]] --
-                        -- Fix: Spams C repeatedly
-                        if _G.AutoTransform then
-                            local char = player.Character
+                        -- ✅ AUTO TRANSFORM (ปรับให้กดแค่ครั้งเดียวต่อ 3 วินาที)
+                        if _G.AutoTransform and tick() - lastTransformTime > 3 then
                             if char and (char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")) then
-                                pressKeyReal(Enum.KeyCode.V) -- Transform key
-                                task.wait(0.2)
-                                -- Spam C multiple times
-                                for i = 1, 8 do
-                                    pressKeyReal(Enum.KeyCode.C)
-                                    task.wait(0.15)
-                                end
+                                debugPrint("Transforming...")
+                                pressKeyReal(Enum.KeyCode.V)
+                                task.wait(0.5)
+                                pressKeyReal(Enum.KeyCode.C)
+                                lastTransformTime = tick()
                             end
                         end
 
-                        -- [[ 2. AUTO SKILLS (Inside Warp) ]] --
-                        -- Will only fire when locked onto target
+                        -- ✅ AUTO SKILLS
                         if _G.SkillSpamEnabled then
-                             if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
-                             if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
-                             if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
-                             if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
+                            if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
+                            if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
+                            if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
+                            if _G.SkillSpam.B then pressKeyReal(Enum.KeyCode.B) end
                         end
                     end
                 else
                     -- [[ PATROL SPAWNS ]] --
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
+                        debugPrint("Patrolling spawn point " .. currentPatrolIndex)
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                             
@@ -425,7 +449,7 @@ task.spawn(function()
                 end
             end
         end
-        task.wait() 
+        task.wait(0.05) -- ✅ แก้จาก task.wait() เป็น 0.05 วินาที
     end
 end)
 
@@ -434,8 +458,8 @@ SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("FluentBen10v2")
-SaveManager:SetFolder("FluentBen10v2/Configs")
+InterfaceManager:SetFolder("FluentBen10Fixed")
+SaveManager:SetFolder("FluentBen10Fixed/Configs")
 
 InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
@@ -444,6 +468,6 @@ Window:SelectTab(1)
 
 Fluent:Notify({
     Title = "Ben 10 Script Loaded",
-    Content = "Satis Priority & Merged Logic Active.",
+    Content = "Warp System FIXED - Satis Priority Active",
     Duration = 5
 })
