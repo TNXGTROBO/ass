@@ -1,7 +1,7 @@
 --[[
-    Ben 10 Mobile Optimized Script [Smart Equip & Patrol Fix + Blacklist]
+    Ben 10 Mobile Optimized Script [Fix Multi-Select Dropdown]
     UI: Orion (Original)
-    Logic: Added 7-Point Patrol System + Item Blacklist (Fixed Multi-Select)
+    Logic: Added 7-Point Patrol System + Item Blacklist (Fixed)
 ]]
 
 -- รอให้เกมโหลดเสร็จ
@@ -21,11 +21,12 @@ if not success or not OrionLib then
     OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))()
 end
 
+-- !! เปลี่ยนชื่อ ConfigFolder เพื่อ Reset ค่าที่จำไว้ (แก้บั๊กเลือกหลายอันไม่ได้) !!
 local Window = OrionLib:MakeWindow({
     Name = "Ben 10 Fix [Patrol & Smart Equip]", 
     HidePremium = false, 
     SaveConfig = true, 
-    ConfigFolder = "Ben10Fixv3",
+    ConfigFolder = "Ben10Fix_MultiV1", -- เปลี่ยนชื่อโฟลเดอร์ใหม่เพื่อแก้บั๊ก Config เก่า
     IntroEnabled = true,
     IntroText = "Patrol & Blacklist Loaded"
 })
@@ -44,10 +45,10 @@ _G.AutoWarpEnabled = false
 _G.AutoTransform = false
 _G.AttackPosition = "Top"
 _G.SmartEquipEnabled = false 
-_G.EquipBlacklist = {} -- เก็บรายชื่อไอเทมที่จะไม่ถือ
+_G.EquipBlacklist = {} 
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
-_G.PatrolWaitTime = 2 -- เวลารอที่จุดเกิด (วินาที)
+_G.PatrolWaitTime = 2 
 
 -- // จุดเกิด 7 จุด (Spawn Points)
 local spawnPoints = {
@@ -97,7 +98,7 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- ฟังก์ชันดึงชื่อไอเทมในตัว (แก้ไขให้มีค่า Default เสมอ)
+-- ฟังก์ชันดึงชื่อไอเทมในตัว
 local function getInventoryTools()
     local tools = {}
     if player.Backpack then
@@ -115,7 +116,6 @@ local function getInventoryTools()
         end
     end
     
-    -- ถ้าไม่มีของเลย ให้ใส่ค่าหลอกๆ เพื่อไม่ให้ Dropdown บั๊ก
     if #tools == 0 then
         return {"No Items Found (Refresh)"}
     end
@@ -179,7 +179,7 @@ task.spawn(function()
     end
 end)
 
--- ** ส่วนที่แก้ไข: Smart Auto Equip แบบมี Blacklist และ Safety Check **
+-- Smart Auto Equip (Fix Logic)
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
@@ -187,19 +187,14 @@ task.spawn(function()
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
                 
-                -- ถ้ายังไม่ได้ถือของ ให้หาของในกระเป๋ามาถือ
                 if not currentTool then
                     local backpack = player:FindFirstChild("Backpack")
                     if backpack then
-                        local foundValidTool = false
-                        
-                        -- วนลูปหาของในกระเป๋า
                         for _, tool in pairs(backpack:GetChildren()) do
                             if tool:IsA("Tool") then
-                                -- เช็คว่าชื่อของนี้ อยู่ใน Blacklist หรือไม่
                                 local isBlacklisted = false
                                 
-                                -- ตรวจสอบว่า Blacklist เป็นตารางข้อมูลจริงหรือไม่ (กัน Error)
+                                -- Check Blacklist
                                 if type(_G.EquipBlacklist) == "table" then
                                     for _, blacklistedName in pairs(_G.EquipBlacklist) do
                                         if tool.Name == blacklistedName then
@@ -209,11 +204,9 @@ task.spawn(function()
                                     end
                                 end
                                 
-                                -- ถ้าไม่อยู่ใน Blacklist ให้ถือเลย
                                 if not isBlacklisted then
                                     char.Humanoid:EquipTool(tool)
-                                    foundValidTool = true
-                                    break -- เจอของดีแล้ว หยุดหา
+                                    break 
                                 end
                             end
                         end
@@ -297,7 +290,7 @@ task.spawn(function()
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                          
+                           
                         lastPatrolTime = tick()
                         currentPatrolIndex = currentPatrolIndex + 1
                         if currentPatrolIndex > #spawnPoints then
@@ -311,7 +304,7 @@ task.spawn(function()
     end
 end)
 
--- // UI SETUP (Orion Original)
+-- // UI SETUP
 local MainTab = Window:MakeTab({ Name = "Auto Farm", Icon = "rbxassetid://4483345998", PremiumOnly = false })
 
 MainTab:AddToggle({
@@ -347,23 +340,26 @@ CombatTab:AddToggle({
     Description = "Automatically equip items NOT in the blacklist"
 })
 
--- ** ส่วน Dropdown Blacklist (แก้ไขแล้ว) **
+-- ** Dropdown Blacklist Fixed **
 local initialTools = getInventoryTools()
 local ToolDropdown
 
 ToolDropdown = CombatTab:AddDropdown({
     Name = "Blacklist Items (Don't Equip)",
-    Default = {}, -- ปล่อยว่างไว้สำหรับ Multi
+    Default = {}, -- การตั้งค่า Default ว่างๆ บางทีทำให้บั๊กใน Orion เก่า แต่ถ้าเปลี่ยน ConfigFolder แล้วน่าจะหาย
     Options = initialTools,
-    Multi = true, -- Multi Select เปิดอยู่
+    Multi = true, -- Multi Select
     Callback = function(Value)
-        _G.EquipBlacklist = Value
-        -- เช็คดูค่าที่ได้
+        -- แปลงค่าที่ได้ให้แน่ใจว่าเป็น Table
         if type(Value) == "table" then
-            print("Updated Blacklist:", table.concat(Value, ", "))
+            _G.EquipBlacklist = Value
         else
-            print("Blacklist Value (Not Table):", Value)
+            -- ถ้ามันบั๊กส่งมาเป็น String (เลือกอันเดียว) ให้จับยัดใส่ Table
+            _G.EquipBlacklist = {Value}
         end
+        
+        -- Debug Print
+        print("Current Blacklist: ", table.concat(_G.EquipBlacklist, ", "))
     end
 })
 
@@ -372,7 +368,7 @@ CombatTab:AddButton({
     Callback = function()
         ToolDropdown:Refresh(getInventoryTools(), true)
     end,
-    Description = "Click this if you got new items and they don't show up"
+    Description = "Click this if you got new items"
 })
 
 CombatTab:AddToggle({ Name = "Enable Skills", Default = false, Callback = function(v) _G.SkillSpamEnabled = v end })
@@ -387,7 +383,7 @@ local MiscTab = Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://4483345998"
 MiscTab:AddButton({
     Name = "Reset Character",
     Callback = function()
-         if player.Character and player.Character:FindFirstChild("Humanoid") then
+          if player.Character and player.Character:FindFirstChild("Humanoid") then
             player.Character.Humanoid.Health = 0
         end
      end    
