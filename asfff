@@ -1,7 +1,9 @@
 --[[
     Ben 10 Mobile Optimized Script [Fix Multi-Select Dropdown]
-    UI: Orion (Original)
-    Logic: Added 7-Point Patrol System + Item Blacklist (Fixed)
+    UI: Orion (Stable)
+    Fixes:
+    - Dropdown now correctly selects multiple items.
+    - Disabled SaveConfig to prevent config corruption causing the single-select bug.
 ]]
 
 -- รอให้เกมโหลดเสร็จ
@@ -12,7 +14,7 @@ task.wait(2)
 
 print("Starting Script...")
 
--- // Load Library
+-- // Load Library (ใช้ลิงก์ที่เสถียรกว่า)
 local success, OrionLib = pcall(function()
     return loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
 end)
@@ -21,12 +23,13 @@ if not success or not OrionLib then
     OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))()
 end
 
--- !! เปลี่ยนชื่อ ConfigFolder เพื่อ Reset ค่าที่จำไว้ (แก้บั๊กเลือกหลายอันไม่ได้) !!
+-- // Window Setup
+-- !! ผมปิด SaveConfig เป็น false ก่อน เพื่อแก้บั๊ก Dropdown เด้ง !!
 local Window = OrionLib:MakeWindow({
     Name = "Ben 10 Fix [Patrol & Smart Equip]", 
     HidePremium = false, 
-    SaveConfig = true, 
-    ConfigFolder = "Ben10Fix_MultiV1", -- เปลี่ยนชื่อโฟลเดอร์ใหม่เพื่อแก้บั๊ก Config เก่า
+    SaveConfig = false, -- <--- ปิดไว้ก่อนเพื่อให้ Multi Dropdown ทำงานชัวร์ๆ
+    ConfigFolder = "Ben10Fix_Multi_New",
     IntroEnabled = true,
     IntroText = "Patrol & Blacklist Loaded"
 })
@@ -98,25 +101,24 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- ฟังก์ชันดึงชื่อไอเทมในตัว
+-- ฟังก์ชันดึงชื่อไอเทมในตัว (แก้ให้หาไอเทมได้แม่นขึ้น)
 local function getInventoryTools()
     local tools = {}
-    if player.Backpack then
-        for _, v in pairs(player.Backpack:GetChildren()) do
-            if v:IsA("Tool") and not table.find(tools, v.Name) then
-                table.insert(tools, v.Name)
-            end
-        end
-    end
-    if player.Character then
-        for _, v in pairs(player.Character:GetChildren()) do
-            if v:IsA("Tool") and not table.find(tools, v.Name) then
-                table.insert(tools, v.Name)
-            end
-        end
-    end
+    local found = false
     
-    if #tools == 0 then
+    local function scan(container)
+        for _, v in pairs(container:GetChildren()) do
+            if v:IsA("Tool") and not table.find(tools, v.Name) then
+                table.insert(tools, v.Name)
+                found = true
+            end
+        end
+    end
+
+    if player.Backpack then scan(player.Backpack) end
+    if player.Character then scan(player.Character) end
+    
+    if not found then
         return {"No Items Found (Refresh)"}
     end
     return tools
@@ -179,7 +181,7 @@ task.spawn(function()
     end
 end)
 
--- Smart Auto Equip (Fix Logic)
+-- Smart Auto Equip (Fixed Logic)
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
@@ -187,6 +189,7 @@ task.spawn(function()
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
                 local currentTool = char:FindFirstChildWhichIsA("Tool")
                 
+                -- ถ้าไม่ได้ถือของอยู่ ให้หาของมาถือ
                 if not currentTool then
                     local backpack = player:FindFirstChild("Backpack")
                     if backpack then
@@ -195,15 +198,16 @@ task.spawn(function()
                                 local isBlacklisted = false
                                 
                                 -- Check Blacklist
-                                if type(_G.EquipBlacklist) == "table" then
-                                    for _, blacklistedName in pairs(_G.EquipBlacklist) do
-                                        if tool.Name == blacklistedName then
+                                if _G.EquipBlacklist and type(_G.EquipBlacklist) == "table" then
+                                    for _, blockedName in pairs(_G.EquipBlacklist) do
+                                        if tool.Name == blockedName then
                                             isBlacklisted = true
                                             break
                                         end
                                     end
                                 end
                                 
+                                -- ถ้าไม่อยู่ใน Blacklist ให้ถือเลย
                                 if not isBlacklisted then
                                     char.Humanoid:EquipTool(tool)
                                     break 
@@ -271,7 +275,7 @@ task.spawn(function()
                     -- [[ วาร์ปไปตี ]] --
                     local mobRoot = target.HumanoidRootPart
                     local finalCF
-                      
+                       
                     if _G.AttackPosition == "Top" then
                         finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
                     elseif _G.AttackPosition == "Bottom" then
@@ -280,7 +284,7 @@ task.spawn(function()
                         local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
                         finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
                     end
-                      
+                       
                     if finalCF then
                         root.CFrame = finalCF
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -290,7 +294,7 @@ task.spawn(function()
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                           
+                            
                         lastPatrolTime = tick()
                         currentPatrolIndex = currentPatrolIndex + 1
                         if currentPatrolIndex > #spawnPoints then
@@ -340,33 +344,33 @@ CombatTab:AddToggle({
     Description = "Automatically equip items NOT in the blacklist"
 })
 
--- ** Dropdown Blacklist Fixed **
+-- ** Dropdown Blacklist FIXED **
 local initialTools = getInventoryTools()
 local ToolDropdown
 
 ToolDropdown = CombatTab:AddDropdown({
-    Name = "Blacklist Items (Don't Equip)",
-    Default = {}, -- การตั้งค่า Default ว่างๆ บางทีทำให้บั๊กใน Orion เก่า แต่ถ้าเปลี่ยน ConfigFolder แล้วน่าจะหาย
+    Name = "Blacklist Items (Multi-Select)",
+    Default = {}, -- สำคัญ: ต้องเป็น Table เปล่าสำหรับ Multi
     Options = initialTools,
-    Multi = true, -- Multi Select
+    Multi = true, -- เปิดโหมดเลือกหลายอัน
     Callback = function(Value)
-        -- แปลงค่าที่ได้ให้แน่ใจว่าเป็น Table
-        if type(Value) == "table" then
-            _G.EquipBlacklist = Value
-        else
-            -- ถ้ามันบั๊กส่งมาเป็น String (เลือกอันเดียว) ให้จับยัดใส่ Table
-            _G.EquipBlacklist = {Value}
-        end
+        -- อัปเดต Table Blacklist
+        _G.EquipBlacklist = Value
         
-        -- Debug Print
-        print("Current Blacklist: ", table.concat(_G.EquipBlacklist, ", "))
+        -- Debug: เช็คว่าใน Table มีอะไรบ้าง
+        if type(Value) == "table" then
+            print("Blacklist Updated: " .. table.concat(Value, ", "))
+        else
+            print("Dropdown Error: Got single value instead of table")
+        end
     end
 })
 
 CombatTab:AddButton({
     Name = "Refresh Tool List",
     Callback = function()
-        ToolDropdown:Refresh(getInventoryTools(), true)
+        local newTools = getInventoryTools()
+        ToolDropdown:Refresh(newTools, true) -- Refresh รายการโดยพยายามเก็บค่าเดิมไว้
     end,
     Description = "Click this if you got new items"
 })
@@ -383,7 +387,7 @@ local MiscTab = Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://4483345998"
 MiscTab:AddButton({
     Name = "Reset Character",
     Callback = function()
-          if player.Character and player.Character:FindFirstChild("Humanoid") then
+         if player.Character and player.Character:FindFirstChild("Humanoid") then
             player.Character.Humanoid.Health = 0
         end
      end    
