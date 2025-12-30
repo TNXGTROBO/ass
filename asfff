@@ -1,7 +1,7 @@
 --[[
     Ben 10 Mobile Optimized Script [Smart Equip & Patrol Fix + Blacklist]
     UI: Orion (Original)
-    Logic: Added 7-Point Patrol System + Item Blacklist
+    Logic: Added 7-Point Patrol System + Item Blacklist (Fixed Multi-Select)
 ]]
 
 -- รอให้เกมโหลดเสร็จ
@@ -12,7 +12,7 @@ task.wait(2)
 
 print("Starting Script...")
 
--- // Load Library (Orion เดิม)
+-- // Load Library
 local success, OrionLib = pcall(function()
     return loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
 end)
@@ -97,7 +97,7 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
--- ฟังก์ชันดึงชื่อไอเทมในตัวเพื่อใส่ใน Dropdown
+-- ฟังก์ชันดึงชื่อไอเทมในตัว (แก้ไขให้มีค่า Default เสมอ)
 local function getInventoryTools()
     local tools = {}
     if player.Backpack then
@@ -113,6 +113,11 @@ local function getInventoryTools()
                 table.insert(tools, v.Name)
             end
         end
+    end
+    
+    -- ถ้าไม่มีของเลย ให้ใส่ค่าหลอกๆ เพื่อไม่ให้ Dropdown บั๊ก
+    if #tools == 0 then
+        return {"No Items Found (Refresh)"}
     end
     return tools
 end
@@ -174,7 +179,7 @@ task.spawn(function()
     end
 end)
 
--- ** ส่วนที่แก้ไข: Smart Auto Equip แบบมี Blacklist **
+-- ** ส่วนที่แก้ไข: Smart Auto Equip แบบมี Blacklist และ Safety Check **
 task.spawn(function()
     while true do
         if _G.SmartEquipEnabled then
@@ -193,10 +198,14 @@ task.spawn(function()
                             if tool:IsA("Tool") then
                                 -- เช็คว่าชื่อของนี้ อยู่ใน Blacklist หรือไม่
                                 local isBlacklisted = false
-                                for _, blacklistedName in pairs(_G.EquipBlacklist) do
-                                    if tool.Name == blacklistedName then
-                                        isBlacklisted = true
-                                        break
+                                
+                                -- ตรวจสอบว่า Blacklist เป็นตารางข้อมูลจริงหรือไม่ (กัน Error)
+                                if type(_G.EquipBlacklist) == "table" then
+                                    for _, blacklistedName in pairs(_G.EquipBlacklist) do
+                                        if tool.Name == blacklistedName then
+                                            isBlacklisted = true
+                                            break
+                                        end
                                     end
                                 end
                                 
@@ -269,7 +278,7 @@ task.spawn(function()
                     -- [[ วาร์ปไปตี ]] --
                     local mobRoot = target.HumanoidRootPart
                     local finalCF
-                     
+                      
                     if _G.AttackPosition == "Top" then
                         finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
                     elseif _G.AttackPosition == "Bottom" then
@@ -278,7 +287,7 @@ task.spawn(function()
                         local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
                         finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
                     end
-                     
+                      
                     if finalCF then
                         root.CFrame = finalCF
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -288,7 +297,7 @@ task.spawn(function()
                     if tick() - lastPatrolTime > _G.PatrolWaitTime then
                         root.CFrame = spawnPoints[currentPatrolIndex]
                         root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                         
+                          
                         lastPatrolTime = tick()
                         currentPatrolIndex = currentPatrolIndex + 1
                         if currentPatrolIndex > #spawnPoints then
@@ -338,16 +347,23 @@ CombatTab:AddToggle({
     Description = "Automatically equip items NOT in the blacklist"
 })
 
--- ** ส่วน Dropdown Blacklist **
+-- ** ส่วน Dropdown Blacklist (แก้ไขแล้ว) **
+local initialTools = getInventoryTools()
 local ToolDropdown
+
 ToolDropdown = CombatTab:AddDropdown({
     Name = "Blacklist Items (Don't Equip)",
-    Default = {},
-    Options = getInventoryTools(),
-    Multi = true, -- ติ๊กได้หลายอัน
+    Default = {}, -- ปล่อยว่างไว้สำหรับ Multi
+    Options = initialTools,
+    Multi = true, -- Multi Select เปิดอยู่
     Callback = function(Value)
         _G.EquipBlacklist = Value
-        print("Updated Blacklist:", table.concat(Value, ", "))
+        -- เช็คดูค่าที่ได้
+        if type(Value) == "table" then
+            print("Updated Blacklist:", table.concat(Value, ", "))
+        else
+            print("Blacklist Value (Not Table):", Value)
+        end
     end
 })
 
