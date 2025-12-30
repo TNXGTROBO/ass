@@ -1,9 +1,10 @@
 --[[
-    Ben 10 Mobile Optimized Script [Fixed Transform Logic]
-    Fixed by: Gemini
+    Ben 10 Mobile Optimized Script [Smart Equip & Patrol Fix]
+    UI: Orion (Original)
+    Logic: Added 7-Point Patrol System
 ]]
 
--- รอให้เกมโหลดเสร็จก่อนค่อยรัน
+-- รอให้เกมโหลดเสร็จ
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -11,23 +12,22 @@ task.wait(2)
 
 print("Starting Script...")
 
--- // Load Library
+-- // Load Library (Orion เดิม)
 local success, OrionLib = pcall(function()
     return loadstring(game:HttpGet(('https://raw.githubusercontent.com/shlexware/Orion/main/source')))()
 end)
 
 if not success or not OrionLib then
-    warn("Failed to load Orion Library!")
     OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jensonhirst/Orion/main/source"))()
 end
 
 local Window = OrionLib:MakeWindow({
-    Name = "Ben 10 Fix Transform (Delta)", 
+    Name = "Ben 10 Fix [Patrol & Smart Equip]", 
     HidePremium = false, 
     SaveConfig = true, 
-    ConfigFolder = "Ben10Fix",
+    ConfigFolder = "Ben10Fixv3",
     IntroEnabled = true,
-    IntroText = "Fixed Version Loaded"
+    IntroText = "Patrol Logic Loaded"
 })
 
 -- // Services
@@ -43,18 +43,41 @@ _G.HeightAboveHead = 6
 _G.AutoWarpEnabled = false
 _G.AutoTransform = false
 _G.AttackPosition = "Top"
-_G.AutoEquipEnabled = false
-_G.SelectedWeapon = "None"
+_G.SmartEquipEnabled = false 
 _G.SkillSpam = { Z = false, X = false, C = false, B = false }
 _G.SkillSpamEnabled = false
+_G.PatrolWaitTime = 2 -- เวลารอที่จุดเกิด (วินาที)
 
-local mobPatterns = { "ROBOTINVASIONEVENT:*", "AMBIENT_MUGGING:*", "AMBIENT_ROBBERY:*", "AMBIENT_TETRA_BRAWL:*"}
+-- // จุดเกิด 7 จุด (Spawn Points) จากสคริปต์ที่สอง
+local spawnPoints = {
+    CFrame.new(1836.52673, 11.0042171, 361.953735),
+    CFrame.new(1175.94763, -6.92456007, 770.222107),
+    CFrame.new(2368.13281, 11.4745083, -682.222168),
+    CFrame.new(1661.77637, -6.41603184, 136.095627),
+    CFrame.new(2361.77368, -5.41125679, -1042.40613),
+    CFrame.new(2092.01367, -58.9112663, 459.680176),
+    CFrame.new(2372.37354, -58.9112625, -865.803833)
+}
+local currentPatrolIndex = 1
+local lastPatrolTime = 0
+
+-- Pattern มอนสเตอร์
+local mobPatterns = {
+    "ROBOTINVASIONEVENT", 
+    "AMBIENT_MUGGING", 
+    "AMBIENT_ROBBERY", 
+    "AMBIENT_TETRA_BRAWL",
+    "Criminal", 
+    "DNAlien",  
+    "Knight",
+    "Satis"
+}
 
 -- // Helper Functions
 local function pressKeyReal(keyCode)
     pcall(function()
         VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-        task.wait(0.1) -- เพิ่มเวลาการกดค้างนิดนึงเพื่อให้เกมรับรู้
+        task.wait(0.05)
         VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
     end)
 end
@@ -73,44 +96,28 @@ local function getRoot()
     return player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 end
 
+-- ฟังก์ชันหาเป้าหมาย
 local function FindTarget()
     local closest = nil
-    local maxDist = 2000
+    local maxDist = 3000 
     local root = getRoot()
     if not root then return nil end
 
     for _, folder in pairs(Workspace:GetChildren()) do
-        for _, pattern in ipairs(mobPatterns) do
-            if (pattern:sub(-1) == "*" and folder.Name:sub(1, #pattern - 1) == pattern:sub(1, -2)) or folder.Name == pattern then
-                for _, obj in pairs(folder:GetChildren()) do
-                    if obj:IsA("Model") and obj:FindFirstChild("HumanoidRootPart") and obj:FindFirstChild("Humanoid") and obj.Humanoid.Health > 0 then
-                        local dist = (root.Position - obj.HumanoidRootPart.Position).Magnitude
-                        if dist < maxDist then
-                            maxDist = dist
-                            closest = obj
-                        end
-                    end
+        if folder:IsA("Model") and folder:FindFirstChild("HumanoidRootPart") and folder:FindFirstChild("Humanoid") and folder.Humanoid.Health > 0 then
+            local name = folder.Name
+            for _, pattern in ipairs(mobPatterns) do
+                if string.find(name, pattern) or string.match(name, pattern) then
+                     local dist = (root.Position - folder.HumanoidRootPart.Position).Magnitude
+                     if dist < maxDist then
+                         maxDist = dist
+                         closest = folder
+                     end
                 end
             end
         end
     end
     return closest
-end
-
-local function GetToolNames()
-    local tools = {}
-    local locations = {player:FindFirstChild("Backpack"), player.Character}
-    for _, loc in pairs(locations) do
-        if loc then
-            for _, item in pairs(loc:GetChildren()) do
-                if item:IsA("Tool") and not table.find(tools, item.Name) then 
-                    table.insert(tools, item.Name) 
-                end
-            end
-        end
-    end
-    if #tools == 0 then return {"None"} end
-    return tools
 end
 
 -- // NoClip System
@@ -135,7 +142,7 @@ task.spawn(function()
         if _G.SkillSpamEnabled then
             local target = FindTarget()
             local root = getRoot()
-            if target and root and (root.Position - target.HumanoidRootPart.Position).Magnitude < 40 then
+            if target and root and (root.Position - target.HumanoidRootPart.Position).Magnitude < 50 then
                 if _G.SkillSpam.Z then pressKeyReal(Enum.KeyCode.Z) end
                 if _G.SkillSpam.X then pressKeyReal(Enum.KeyCode.X) end
                 if _G.SkillSpam.C then pressKeyReal(Enum.KeyCode.C) end
@@ -146,15 +153,21 @@ task.spawn(function()
     end
 end)
 
--- Auto Equip
+-- Smart Auto Equip
 task.spawn(function()
     while true do
-        if _G.AutoEquipEnabled and _G.SelectedWeapon ~= "None" then
+        if _G.SmartEquipEnabled then
             local char = player.Character
             if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                if not char:FindFirstChild(_G.SelectedWeapon) then
-                    local tool = player.Backpack:FindFirstChild(_G.SelectedWeapon)
-                    if tool then char.Humanoid:EquipTool(tool) end
+                local currentTool = char:FindFirstChildWhichIsA("Tool")
+                if not currentTool then
+                    local backpack = player:FindFirstChild("Backpack")
+                    if backpack then
+                        local toolToEquip = backpack:FindFirstChildWhichIsA("Tool")
+                        if toolToEquip then
+                            char.Humanoid:EquipTool(toolToEquip)
+                        end
+                    end
                 end
             end
         end
@@ -162,26 +175,17 @@ task.spawn(function()
     end
 end)
 
--- [[ ส่วนที่แก้: Auto Transform ]] --
+-- Auto Transform
 task.spawn(function()
     while true do
         if _G.AutoTransform then
             local char = player.Character
-            -- เช็คว่าเป็นร่างคนหรือไม่
             if char and (char:GetAttribute("Alien") == "Human" or not char:GetAttribute("Alien")) then
-                
-                -- กด V เพื่อเปิดนาฬิกา
                 pressKeyReal(Enum.KeyCode.V)
-                
-                -- แก้ไข: รอให้นานขึ้น (จาก 1.5 เป็น 2.5 วินาที) เผื่ออนิเมชั่นช้าหรือแลค
                 task.wait(2.5) 
-                
-                -- แก้ไข: กดย้ำปุ่ม C สองรอบเพื่อให้ชัวร์ว่าแปลงร่าง
                 pressKeyReal(Enum.KeyCode.C)
                 task.wait(0.2)
                 pressKeyReal(Enum.KeyCode.C)
-                
-                -- รอให้ Cooldown การแปลงร่างเสร็จ
                 task.wait(6)
             end
         end
@@ -193,50 +197,78 @@ end)
 task.spawn(function()
     while true do
         if _G.AutoWarpEnabled then
-            local atk, anims = getCombatHandler()
-            if atk and FindTarget() then
-                pcall(function()
-                    atk:FireServer("Attack", false, anims)
-                    atk:FireServer("HeavyAttack", false, anims)
-                end)
+            local target = FindTarget() -- เช็คก่อนว่ามีเป้าหมายไหมค่อยตี
+            if target then
+                local atk, anims = getCombatHandler()
+                if atk then
+                    pcall(function()
+                        atk:FireServer("Attack", false, anims)
+                        atk:FireServer("HeavyAttack", false, anims)
+                    end)
+                else
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                    task.wait(0.05)
+                    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                end
             end
         end
         task.wait(0.15)
     end
 end)
 
--- Auto Warp Logic
-RunService.Heartbeat:Connect(function()
-    if _G.AutoWarpEnabled then
-        local root = getRoot()
-        local target = FindTarget()
-        
-        if target and root then
-            local mobRoot = target.HumanoidRootPart
-            local finalCF
+-- ** ส่วนที่แก้ไขใหม่: Auto Warp + Patrol Logic **
+task.spawn(function()
+    while true do
+        if _G.AutoWarpEnabled then
+            local root = getRoot()
+            local target = FindTarget()
             
-            if _G.AttackPosition == "Top" then
-                finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
-            elseif _G.AttackPosition == "Bottom" then
-                finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
-            elseif _G.AttackPosition == "Side" then
-                local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
-                finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
-            end
-            
-            if finalCF then
-                root.CFrame = finalCF
-                root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            if root then
+                if target and target:FindFirstChild("HumanoidRootPart") then
+                    -- [[ กรณีเจอเป้าหมาย: วาร์ปไปตีตามปกติ ]] --
+                    local mobRoot = target.HumanoidRootPart
+                    local finalCF
+                    
+                    if _G.AttackPosition == "Top" then
+                        finalCF = CFrame.new(mobRoot.Position + Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(-90), 0, 0)
+                    elseif _G.AttackPosition == "Bottom" then
+                        finalCF = CFrame.new(mobRoot.Position - Vector3.new(0, _G.HeightAboveHead, 0), mobRoot.Position) * CFrame.Angles(math.rad(90), 0, 0)
+                    elseif _G.AttackPosition == "Side" then
+                        local backPos = mobRoot.CFrame * CFrame.new(0, 0, _G.HeightAboveHead)
+                        finalCF = CFrame.lookAt(backPos.Position, mobRoot.Position)
+                    end
+                    
+                    if finalCF then
+                        root.CFrame = finalCF
+                        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                else
+                    -- [[ กรณีไม่เจอเป้าหมาย: เข้าโหมด Patrol (วนจุดเกิด) ]] --
+                    if tick() - lastPatrolTime > _G.PatrolWaitTime then
+                        -- วาร์ปไปจุดเกิดปัจจุบัน
+                        root.CFrame = spawnPoints[currentPatrolIndex]
+                        root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        
+                        -- อัปเดตเวลาและลำดับ
+                        lastPatrolTime = tick()
+                        currentPatrolIndex = currentPatrolIndex + 1
+                        if currentPatrolIndex > #spawnPoints then
+                            currentPatrolIndex = 1
+                        end
+                    end
+                end
             end
         end
+        -- ใช้ task.wait เล็กน้อยเพื่อไม่ให้กินทรัพยากรมากเกินไป แต่ยังวาร์ปเนียน
+        task.wait() 
     end
 end)
 
--- // UI SETUP
+-- // UI SETUP (Orion Original)
 local MainTab = Window:MakeTab({ Name = "Auto Farm", Icon = "rbxassetid://4483345998", PremiumOnly = false })
 
 MainTab:AddToggle({
-    Name = "Auto Warp + Kill",
+    Name = "Auto Warp + Kill (with Patrol)",
     Default = false,
     Callback = function(Value) _G.AutoWarpEnabled = Value end    
 })
@@ -253,7 +285,21 @@ MainTab:AddSlider({
     Callback = function(Value) _G.HeightAboveHead = Value end    
 })
 
-local CombatTab = Window:MakeTab({ Name = "Combat", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+-- เพิ่ม Slider สำหรับปรับความเร็วในการย้ายจุดเกิด
+MainTab:AddSlider({
+    Name = "Patrol Wait Time", Min = 0, Max = 10, Default = 2, Increment = 0.5, ValueName = "Secs",
+    Callback = function(Value) _G.PatrolWaitTime = Value end,
+    Description = "Time to wait at each spawn point if no mobs found"
+})
+
+local CombatTab = Window:MakeTab({ Name = "Combat & Items", Icon = "rbxassetid://4483345998", PremiumOnly = false })
+
+CombatTab:AddToggle({
+    Name = "Auto Smart Equip Tool", 
+    Default = false, 
+    Callback = function(Value) _G.SmartEquipEnabled = Value end,
+    Description = "Automatically finds and holds your weapon/watch"
+})
 
 CombatTab:AddToggle({ Name = "Enable Skills", Default = false, Callback = function(v) _G.SkillSpamEnabled = v end })
 CombatTab:AddToggle({ Name = "Auto Z", Default = false, Callback = function(v) _G.SkillSpam.Z = v end })
@@ -261,24 +307,6 @@ CombatTab:AddToggle({ Name = "Auto X", Default = false, Callback = function(v) _
 CombatTab:AddToggle({ Name = "Auto C", Default = false, Callback = function(v) _G.SkillSpam.C = v end })
 CombatTab:AddToggle({ Name = "Auto B", Default = false, Callback = function(v) _G.SkillSpam.B = v end })
 CombatTab:AddToggle({ Name = "Auto Transform", Default = false, Callback = function(v) _G.AutoTransform = v end })
-
-local ItemTab = Window:MakeTab({ Name = "Items", Icon = "rbxassetid://4483345998", PremiumOnly = false })
-
-local WeaponDropdown = ItemTab:AddDropdown({
-    Name = "Select Weapon",
-    Default = "None",
-    Options = GetToolNames(),
-    Callback = function(Value) _G.SelectedWeapon = Value end    
-})
-
-ItemTab:AddButton({
-    Name = "Refresh Weapon List",
-    Callback = function() WeaponDropdown:Refresh(GetToolNames(), true) end    
-})
-
-ItemTab:AddToggle({
-    Name = "Auto Hold Weapon", Default = false, Callback = function(Value) _G.AutoEquipEnabled = Value end    
-})
 
 local MiscTab = Window:MakeTab({ Name = "Misc", Icon = "rbxassetid://4483345998", PremiumOnly = false })
 
@@ -292,4 +320,3 @@ MiscTab:AddButton({
 })
 
 OrionLib:Init()
-print("Script Loaded!")
